@@ -1,7 +1,23 @@
-﻿using RoadReady1.Models.DTOs;
+﻿using System.Threading.Tasks;
+using RoadReady1.Models.DTOs;
 
-public interface IAuthService
+namespace RoadReady1.Interfaces
 {
-    Task RegisterAsync(UserRegisterDto dto);
-    Task<string> LoginAsync(UserLoginDto dto);
+    /// <summary>
+    /// Authentication/authorization service:
+    /// - Public registration
+    /// - Admin registration (can set any role)
+    /// - Login
+    /// </summary>
+    public interface IAuthService
+    {
+        // Public register: always Customer (3)
+        Task<UserDto> RegisterAsync(UserRegisterDto dto);
+
+        // Admin-only register: honors dto.RoleId (1/2/3)
+        Task<UserDto> RegisterWithRoleAsync(UserRegisterDto dto);
+
+        // Login returns JWT
+        Task<string> LoginAsync(UserLoginDto dto);
+    }
 }

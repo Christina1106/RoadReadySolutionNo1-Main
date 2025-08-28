@@ -7,10 +7,7 @@ using RoadReady1.Models;
 
 namespace RoadReady1.Context
 {
-    /// <summary>
-    /// EF Core DbContext for RoadReady.
-    /// Includes parameterless ctor and OnConfiguring fallback so migrations work out of the box.
-    /// </summary>
+   
     public class RoadReadyDbContext : DbContext
     {
         // Parameterless ctor for design-time instantiation
@@ -22,10 +19,7 @@ namespace RoadReady1.Context
         {
         }
 
-        /// <summary>
-        /// Fallback configuration: reads ConnectionStrings:defaultConnection from appsettings.json or env.
-        /// Throws if missing.
-        /// </summary>
+       
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
             if (!optionsBuilder.IsConfigured)
@@ -61,10 +55,6 @@ namespace RoadReady1.Context
         public DbSet<MaintenanceRequest> MaintenanceRequests { get; set; }
         public DbSet<BookingIssue> BookingIssues { get; set; }
         public DbSet<Refund> Refunds { get; set; }
-
-
-        public DbSet<PasswordResetToken> PasswordResetTokens { get; set; }   // <-- add if missing
-
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);

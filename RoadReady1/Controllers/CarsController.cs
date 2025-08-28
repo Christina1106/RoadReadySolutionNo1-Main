@@ -1,18 +1,41 @@
 ﻿// File: Controllers/CarsController.cs
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using RoadReady1.Exceptions;
 using RoadReady1.Interfaces;
 using RoadReady1.Models.DTOs;
+using RoadReady1.Services;
+using RoadReady1.Filters;
 
 namespace RoadReady1.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [CustomExceptionFilter]
+    [EnableCors("DefaultCORS")]
+
+
+
     public class CarsController : ControllerBase
     {
         private readonly ICarService _cars;
         public CarsController(ICarService cars) => _cars = cars;
+
+
+
+
+
+        [HttpGet("search-by-brand")]
+        [AllowAnonymous] // allow everyone to browse; remove if you want auth
+        public async Task<ActionResult<IEnumerable<CarDto>>> SearchByBrand([FromQuery] string brand)
+        {
+            if (string.IsNullOrWhiteSpace(brand))
+                return BadRequest(new { message = "Query 'brand' is required." });
+
+            var cars = await _cars.SearchByBrandAsync(brand);
+            return Ok(cars);
+        }
 
         // Public list
         [HttpGet]

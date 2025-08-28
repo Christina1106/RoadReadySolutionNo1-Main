@@ -1,15 +1,22 @@
 ﻿// File: Controllers/UsersController.cs
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using RoadReady1.Exceptions;
 using RoadReady1.Interfaces;
 using RoadReady1.Models.DTOs;
-using RoadReady1.Exceptions;
+using RoadReady1.Filters;
+using System.Security.Claims;
 
 namespace RoadReady1.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
+
+    [CustomExceptionFilter]
+    [EnableCors("DefaultCORS")]
+
     public class UsersController : ControllerBase
     {
         private readonly IUserService _userService;
@@ -17,6 +24,32 @@ namespace RoadReady1.Controllers
         public UsersController(IUserService userService)
         {
             _userService = userService;
+        }
+
+
+        // inside RoadReady1.Controllers.UsersController
+        [HttpGet("me")]
+        public async Task<ActionResult<UserMeDto>> Me()
+        {
+            // Prefer Email/NameIdentifier; fall back to "sub"
+            var email = User.FindFirstValue(ClaimTypes.Email)
+                      ?? User.FindFirstValue(ClaimTypes.NameIdentifier)
+                      ?? User.FindFirst("sub")?.Value;
+
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { message = "Token does not include an email/sub." });
+
+            var me = await _userService.GetByEmailAsync(email);
+            if (me == null) return NotFound();
+
+            return Ok(new UserMeDto
+            {
+                UserId = me.UserId,
+                FirstName = me.FirstName,
+                LastName = me.LastName,
+                Email = me.Email,
+                RoleName = me.Role?.RoleName
+            });
         }
 
         /// <summary>

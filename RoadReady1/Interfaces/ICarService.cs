@@ -12,6 +12,8 @@ namespace RoadReady1.Interfaces
         Task DeleteAsync(int id);
         Task<IEnumerable<CarDto>> SearchAsync(CarSearchRequestDto req);
 
+        Task<IEnumerable<CarDto>> SearchByBrandAsync(string brandName);
+
         // For BookingService later, and a simple availability endpoint now
         Task<bool> IsAvailableAsync(int carId, DateTime fromUtc, DateTime toUtc);
         Task EnsureAvailableAsync(int carId, DateTime fromUtc, DateTime toUtc); // throws CarUnavailableException

@@ -53,7 +53,7 @@ namespace RoadReady1.Services
             var entity = new MaintenanceRequest
             {
                 CarId = dto.CarId,
-                ReportedById = userId,                    // <-- FK int (fix)
+                ReportedById = userId,                    // fk int
                 IssueDescription = dto.IssueDescription.Trim(),
                 ReportedDate = DateTime.UtcNow,
                 IsResolved = false

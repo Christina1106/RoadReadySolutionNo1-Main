@@ -111,7 +111,7 @@ namespace RoadReady1.Services
             if (!string.IsNullOrWhiteSpace(req.Transmission))
                 cars = cars.Where(c => c.Transmission == req.Transmission);
             if (req.MinSeats.HasValue)
-                cars = cars.Where(c => c.Seats.HasValue && c.Seats.Value >= req.MinSeats.Value);
+                cars = cars.Where(c => c.Seats >= req.MinSeats.Value);      // Seats is int
             if (req.MaxDailyRate.HasValue)
                 cars = cars.Where(c => c.DailyRate <= req.MaxDailyRate.Value);
 
@@ -149,7 +149,26 @@ namespace RoadReady1.Services
                 throw new CarUnavailableException(carId);
         }
 
-        // Helpers
+        public async Task<IEnumerable<CarDto>> SearchByBrandAsync(string brandName)
+        {
+            if (string.IsNullOrWhiteSpace(brandName))
+                return Enumerable.Empty<CarDto>();
+
+            var brands = await _brandRepo.GetAllAsync();
+            var matchedBrandIds = brands
+                .Where(b => b.BrandName.Contains(brandName, StringComparison.OrdinalIgnoreCase))
+                .Select(b => b.BrandId)
+                .ToHashSet();
+
+            if (matchedBrandIds.Count == 0)
+                return Enumerable.Empty<CarDto>();
+
+            var cars = await _carRepo.GetAllAsync();
+            var filtered = cars.Where(c => matchedBrandIds.Contains(c.BrandId));
+            return await EnrichAndMapAsync(filtered);
+        }
+
+        // ----- helpers -----
         private async Task<IEnumerable<CarDto>> EnrichAndMapAsync(IEnumerable<Car> cars)
         {
             var list = cars.ToList();

@@ -2,6 +2,8 @@ using Moq;
 using NUnit.Framework;
 using Microsoft.AspNetCore.Identity;
 using AutoMapper;
+using Microsoft.EntityFrameworkCore;          // <-- add this
+using RoadReady1.Context;
 using RoadReady1.Interfaces;
 using RoadReady1.Models;
 using RoadReady1.Models.DTOs;
@@ -15,15 +17,31 @@ namespace RoadReadyTest
         private Mock<IRepository<int, User>> _repo = null!;
         private Mock<IMapper> _mapper = null!;
         private Mock<IPasswordHasher<User>> _hasher = null!;
+        private RoadReadyDbContext _db = null!;
         private UserService _svc = null!;
 
         [SetUp]
         public void Setup()
         {
+            // 1) Mocks
             _repo = new Mock<IRepository<int, User>>();
             _mapper = new Mock<IMapper>();
             _hasher = new Mock<IPasswordHasher<User>>();
-            _svc = new UserService(_repo.Object, _mapper.Object, _hasher.Object);
+
+            // 2) InMemory DbContext for tests
+            var options = new DbContextOptionsBuilder<RoadReadyDbContext>()
+                .UseInMemoryDatabase(databaseName: "RoadReady_TestDB_" + Guid.NewGuid())
+                .Options;
+            _db = new RoadReadyDbContext(options);
+
+            // 3) Service under test (match the constructor)
+            _svc = new UserService(_repo.Object, _db, _mapper.Object, _hasher.Object);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            _db.Dispose();
         }
 
         [Test]
@@ -36,7 +54,7 @@ namespace RoadReadyTest
                 Email = "jane@example.com",
                 PhoneNumber = "9999999999",
                 Password = "P@ssw0rd!",
-                RoleId = 3 // if your dto doesn’t have this, remove it
+                RoleId = 3
             };
 
             var entity = new User
@@ -52,7 +70,14 @@ namespace RoadReadyTest
             _repo.Setup(r => r.AddAsync(It.IsAny<User>()))
                  .ReturnsAsync((User u) => { u.UserId = 42; return u; });
 
-            var mappedBack = new UserDto { UserId = 42, Email = create.Email, FirstName = "Jane", LastName = "Doe", PhoneNumber = "9999999999" };
+            var mappedBack = new UserDto
+            {
+                UserId = 42,
+                Email = create.Email,
+                FirstName = "Jane",
+                LastName = "Doe",
+                PhoneNumber = "9999999999"
+            };
             _mapper.Setup(m => m.Map<UserDto>(It.Is<User>(u => u.UserId == 42))).Returns(mappedBack);
 
             var result = await _svc.CreateAsync(create);

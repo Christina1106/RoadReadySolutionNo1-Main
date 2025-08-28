@@ -1,14 +1,18 @@
 ﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using RoadReady1.Exceptions;
 using RoadReady1.Interfaces;
 using RoadReady1.Models.DTOs;
 using System.Security.Claims;
+using RoadReady1.Filters;
 
 namespace RoadReady1.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [CustomExceptionFilter]
+    [EnableCors("DefaultCORS")]
     public class MaintenanceRequestsController : ControllerBase
     {
         private readonly IMaintenanceRequestService _svc;
