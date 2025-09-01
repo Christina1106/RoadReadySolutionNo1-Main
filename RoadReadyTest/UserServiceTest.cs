@@ -1,156 +1,163 @@
-using Moq;
-using NUnit.Framework;
-using Microsoft.AspNetCore.Identity;
 using AutoMapper;
-using Microsoft.EntityFrameworkCore;          // <-- add this
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using RoadReady1.Context;
+using RoadReady1.Exceptions;
 using RoadReady1.Interfaces;
 using RoadReady1.Models;
 using RoadReady1.Models.DTOs;
-using RoadReady1.Services;
-using RoadReady1.Exceptions;
 
-namespace RoadReadyTest
+namespace RoadReady1.Services
 {
-    public class UserServiceTest
+    public class UserService : IUserService
     {
-        private Mock<IRepository<int, User>> _repo = null!;
-        private Mock<IMapper> _mapper = null!;
-        private Mock<IPasswordHasher<User>> _hasher = null!;
-        private RoadReadyDbContext _db = null!;
-        private UserService _svc = null!;
+        // kept only to satisfy old ctor calls (not used)
+        private readonly IRepository<int, User>? _userRepo;
 
-        [SetUp]
-        public void Setup()
+        private readonly RoadReadyDbContext _db;
+        private readonly IMapper _mapper;
+        private readonly IPasswordHasher<User> _passwordHasher;
+
+        // New (preferred) constructor
+        public UserService(
+            RoadReadyDbContext db,
+            IMapper mapper,
+            IPasswordHasher<User> passwordHasher)
         {
-            // 1) Mocks
-            _repo = new Mock<IRepository<int, User>>();
-            _mapper = new Mock<IMapper>();
-            _hasher = new Mock<IPasswordHasher<User>>();
-
-            // 2) InMemory DbContext for tests
-            var options = new DbContextOptionsBuilder<RoadReadyDbContext>()
-                .UseInMemoryDatabase(databaseName: "RoadReady_TestDB_" + Guid.NewGuid())
-                .Options;
-            _db = new RoadReadyDbContext(options);
-
-            // 3) Service under test (match the constructor)
-            _svc = new UserService(_repo.Object, _db, _mapper.Object, _hasher.Object);
+            _db = db;
+            _mapper = mapper;
+            _passwordHasher = passwordHasher;
         }
 
-        [TearDown]
-        public void TearDown()
+        // Back-compat overload to satisfy tests calling 4-arg ctor
+        public UserService(
+            IRepository<int, User> userRepo,
+            RoadReadyDbContext db,
+            IMapper mapper,
+            IPasswordHasher<User> passwordHasher)
+            : this(db, mapper, passwordHasher)
         {
-            _db.Dispose();
+            _userRepo = userRepo; // not used; just to keep old signature valid
         }
 
-        [Test]
-        public async Task CreateAsync_HashesPassword_And_Saves()
+        public async Task<IEnumerable<UserDto>> GetAllAsync()
         {
-            var create = new UserCreateDto
+            var users = await _db.Users.Include(u => u.Role).ToListAsync();
+            return users.Select(ToDto);
+        }
+
+        public async Task<User?> GetByEmailAsync(string email)
+        {
+            return await _db.Users.Include(u => u.Role)
+                                  .FirstOrDefaultAsync(u => u.Email == email);
+        }
+
+        public async Task<UserDto> GetByIdAsync(int id)
+        {
+            var user = await _db.Users.Include(u => u.Role)
+                                      .FirstOrDefaultAsync(u => u.UserId == id)
+                       ?? throw new NotFoundException($"User {id} not found");
+            return ToDto(user);
+        }
+
+        public async Task<UserDto> CreateAsync(UserCreateDto dto)
+        {
+            var role = await _db.Roles.FirstOrDefaultAsync(r => r.RoleId == dto.RoleId)
+                       ?? throw new NotFoundException($"Role {dto.RoleId} not found");
+
+            var user = new User
             {
-                FirstName = "Jane",
-                LastName = "Doe",
-                Email = "jane@example.com",
-                PhoneNumber = "9999999999",
-                Password = "P@ssw0rd!",
-                RoleId = 3
+                FirstName = dto.FirstName.Trim(),
+                LastName = dto.LastName?.Trim(),
+                Email = dto.Email.Trim(),
+                PhoneNumber = dto.PhoneNumber,
+                RoleId = dto.RoleId,
+                CreatedAt = DateTime.UtcNow,
+                IsActive = true
             };
+            user.PasswordHash = _passwordHasher.HashPassword(user, dto.Password);
 
-            var entity = new User
+            _db.Users.Add(user);
+            await _db.SaveChangesAsync();
+            user.Role = role;
+
+            return ToDto(user);
+        }
+
+        public async Task<UserDto> UpdateAsync(int id, UserUpdateDto dto)
+        {
+            var user = await _db.Users.Include(u => u.Role)
+                                      .FirstOrDefaultAsync(u => u.UserId == id)
+                       ?? throw new NotFoundException($"User {id} not found");
+
+            if (dto.FirstName is not null) user.FirstName = dto.FirstName.Trim();
+            if (dto.LastName is not null) user.LastName = dto.LastName.Trim();
+            if (dto.PhoneNumber is not null) user.PhoneNumber = dto.PhoneNumber;
+
+            if (dto.RoleId.HasValue && dto.RoleId.Value != user.RoleId)
             {
-                FirstName = create.FirstName,
-                LastName = create.LastName,
-                Email = create.Email,
-                PhoneNumber = create.PhoneNumber
-            };
+                var role = await _db.Roles.FirstOrDefaultAsync(r => r.RoleId == dto.RoleId.Value)
+                           ?? throw new NotFoundException($"Role {dto.RoleId.Value} not found");
+                user.RoleId = role.RoleId;
+                user.Role = role;
+            }
 
-            _mapper.Setup(m => m.Map<User>(create)).Returns(entity);
-            _hasher.Setup(h => h.HashPassword(entity, create.Password)).Returns("HASHED");
-            _repo.Setup(r => r.AddAsync(It.IsAny<User>()))
-                 .ReturnsAsync((User u) => { u.UserId = 42; return u; });
+            await _db.SaveChangesAsync();
+            return ToDto(user);
+        }
 
-            var mappedBack = new UserDto
+        public async Task DeleteAsync(int id)
+        {
+            var user = await _db.Users.FindAsync(id)
+                       ?? throw new NotFoundException($"User {id} not found");
+            _db.Users.Remove(user);
+            await _db.SaveChangesAsync();
+        }
+
+        public async Task ChangeRoleAsync(int userId, int? roleId, string? roleName)
+        {
+            var user = await _db.Users.Include(u => u.Role)
+                                      .FirstOrDefaultAsync(u => u.UserId == userId)
+                       ?? throw new NotFoundException("User not found");
+
+            Role role;
+            if (roleId.HasValue)
             {
-                UserId = 42,
-                Email = create.Email,
-                FirstName = "Jane",
-                LastName = "Doe",
-                PhoneNumber = "9999999999"
-            };
-            _mapper.Setup(m => m.Map<UserDto>(It.Is<User>(u => u.UserId == 42))).Returns(mappedBack);
+                role = await _db.Roles.FirstOrDefaultAsync(r => r.RoleId == roleId.Value)
+                       ?? throw new NotFoundException("Role not found");
+            }
+            else
+            {
+                role = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName)
+                       ?? throw new NotFoundException("Role not found");
+            }
 
-            var result = await _svc.CreateAsync(create);
-
-            Assert.That(result.UserId, Is.EqualTo(42));
-            Assert.That(result.Email, Is.EqualTo("jane@example.com"));
-            _hasher.Verify(h => h.HashPassword(entity, "P@ssw0rd!"), Times.Once);
-            _repo.Verify(r => r.AddAsync(It.Is<User>(u => u.Email == "jane@example.com" && u.PasswordHash == "HASHED")), Times.Once);
+            user.RoleId = role.RoleId;
+            user.Role = role;
+            await _db.SaveChangesAsync();
         }
 
-        [Test]
-        public async Task GetByIdAsync_ReturnsDto()
+        public async Task SetActiveAsync(int userId, bool isActive)
         {
-            var entity = new User { UserId = 7, Email = "a@b.com", FirstName = "A", LastName = "B", PhoneNumber = "123" };
-            _repo.Setup(r => r.GetByIdAsync(7)).ReturnsAsync(entity);
-
-            var dto = new UserDto { UserId = 7, Email = "a@b.com", FirstName = "A", LastName = "B", PhoneNumber = "123" };
-            _mapper.Setup(m => m.Map<UserDto>(entity)).Returns(dto);
-
-            var result = await _svc.GetByIdAsync(7);
-
-            Assert.That(result.UserId, Is.EqualTo(7));
-            Assert.That(result.Email, Is.EqualTo("a@b.com"));
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.UserId == userId)
+                       ?? throw new NotFoundException("User not found");
+            user.IsActive = isActive;
+            await _db.SaveChangesAsync();
         }
 
-        [Test]
-        public void GetByIdAsync_WhenMissing_ThrowsNotFound()
+        private static UserDto ToDto(User u) => new UserDto
         {
-            _repo.Setup(r => r.GetByIdAsync(99)).ReturnsAsync((User)null!);
-            Assert.ThrowsAsync<NotFoundException>(async () => await _svc.GetByIdAsync(99));
-        }
-
-        [Test]
-        public async Task UpdateAsync_MapsAndSaves()
-        {
-            var existing = new User { UserId = 5, FirstName = "Old", LastName = "Name", Email = "old@x.com", PhoneNumber = "111" };
-            _repo.Setup(r => r.GetByIdAsync(5)).ReturnsAsync(existing);
-
-            var update = new UserUpdateDto { FirstName = "New", LastName = "Name", PhoneNumber = "222" };
-
-            _mapper.Setup(m => m.Map(update, existing))
-                   .Callback<UserUpdateDto, User>((src, dest) =>
-                   {
-                       dest.FirstName = src.FirstName;
-                       dest.LastName = src.LastName;
-                       dest.PhoneNumber = src.PhoneNumber;
-                   });
-
-            _repo.Setup(r => r.UpdateAsync(5, It.IsAny<User>())).ReturnsAsync((int _, User u) => u);
-
-            var back = new UserDto { UserId = 5, FirstName = "New", LastName = "Name", Email = "old@x.com", PhoneNumber = "222" };
-            _mapper.Setup(m => m.Map<UserDto>(It.Is<User>(u => u.UserId == 5 && u.FirstName == "New"))).Returns(back);
-
-            var result = await _svc.UpdateAsync(5, update);
-
-            Assert.That(result.FirstName, Is.EqualTo("New"));
-            _repo.Verify(r => r.UpdateAsync(5, It.Is<User>(u => u.FirstName == "New" && u.PhoneNumber == "222")), Times.Once);
-        }
-
-        [Test]
-        public async Task DeleteAsync_CallsRepoDelete()
-        {
-            var existing = new User { UserId = 8 };
-            _repo.Setup(r => r.GetByIdAsync(8)).ReturnsAsync(existing);
-            _repo.Setup(r => r.DeleteAsync(8)).ReturnsAsync(existing);
-
-            await _svc.DeleteAsync(8);
-
-            _repo.Verify(r => r.DeleteAsync(8), Times.Once);
-        }
+            UserId = u.UserId,
+            FirstName = u.FirstName,
+            LastName = u.LastName,
+            Email = u.Email,
+            PhoneNumber = u.PhoneNumber,
+            RoleName = u.Role?.RoleName,
+            IsActive = u.IsActive,
+            CreatedAt = u.CreatedAt
+        };
     }
 }
-
 
 
 

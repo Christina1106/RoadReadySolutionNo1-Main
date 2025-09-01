@@ -1,5 +1,4 @@
 // Program.cs
-using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +10,9 @@ using RoadReady1.Interfaces;
 using RoadReady1.Models;
 using RoadReady1.Repositories;
 using RoadReady1.Services;
+using System.Security.Claims;
+using System.Text;
+
 
 var builder = WebApplication.CreateBuilder(args);
 var config = builder.Configuration;
@@ -61,12 +63,13 @@ builder.Services.AddCors(options =>
         .WithOrigins(
             "http://localhost:3000",
             "http://localhost:3001",
-            "http://localhost:3002" // your current React origin
+            "http://localhost:3002",
+            "http://localhost:5047" // your current React origin
         )
         .AllowAnyHeader()
         .AllowAnyMethod()
     // Only add .AllowCredentials() if you use cookies; if you do, keep explicit origins
-    // .AllowCredentials()
+       .AllowCredentials()
     );
 });
 
@@ -94,7 +97,10 @@ builder.Services
             ValidateAudience = true,
             ValidAudience = jwtSection["Audience"],
             ValidateLifetime = true,
-            ClockSkew = TimeSpan.Zero
+            ClockSkew = TimeSpan.Zero,
+
+            RoleClaimType = ClaimTypes.Role,              // matches your token's role claim URI
+            NameClaimType = ClaimTypes.Email
         };
     });
 

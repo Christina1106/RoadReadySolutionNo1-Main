@@ -16,9 +16,29 @@ namespace RoadReady1.Controllers
     public class MaintenanceRequestsController : ControllerBase
     {
         private readonly IMaintenanceRequestService _svc;
-        public MaintenanceRequestsController(IMaintenanceRequestService svc) => _svc = svc;
+        private readonly IUserService _users; // 👈 add
 
-        private int CurrentUserId => int.Parse(User.FindFirstValue("uid")!);
+        public MaintenanceRequestsController(IMaintenanceRequestService svc, IUserService users) // 👈 inject
+        {
+            _svc = svc;
+            _users = users;
+        }
+
+        // resolve current user id from email/sub in token
+        private async Task<int> CurrentUserIdAsync()
+        {
+            var email = User.FindFirstValue(ClaimTypes.Email)
+                       ?? User.FindFirstValue(ClaimTypes.NameIdentifier)
+                       ?? User.FindFirst("sub")?.Value;
+
+            if (string.IsNullOrWhiteSpace(email))
+                throw new UnauthorizedException("Token missing email/sub claim.");
+
+            var me = await _users.GetByEmailAsync(email);
+            if (me is null) throw new UnauthorizedException("User not found.");
+            return me.UserId;
+        }
+
         private string CurrentRole => User.FindFirstValue(ClaimTypes.Role) ?? string.Empty;
 
         // Create (Customer or Staff)
@@ -28,7 +48,8 @@ namespace RoadReady1.Controllers
         {
             try
             {
-                var created = await _svc.CreateAsync(CurrentUserId, CurrentRole, dto);
+                var uid = await CurrentUserIdAsync();                             // 👈 changed
+                var created = await _svc.CreateAsync(uid, CurrentRole, dto);      // 👈 same service API
                 return CreatedAtAction(nameof(GetById), new { id = created.RequestId }, created);
             }
             catch (NotFoundException ex) { return NotFound(new { ex.Message }); }
@@ -36,7 +57,6 @@ namespace RoadReady1.Controllers
             catch (BadRequestException ex) { return BadRequest(new { ex.Message }); }
         }
 
-        // Staff: resolve
         [HttpPatch("{id:int}/resolve")]
         [Authorize(Roles = "Admin,RentalAgent")]
         public async Task<IActionResult> Resolve(int id)
@@ -46,25 +66,21 @@ namespace RoadReady1.Controllers
             catch (BadRequestException ex) { return BadRequest(new { ex.Message }); }
         }
 
-        // Staff: open requests
         [HttpGet("open")]
         [Authorize(Roles = "Admin,RentalAgent")]
         public async Task<IEnumerable<MaintenanceRequestDto>> Open()
             => await _svc.GetOpenAsync();
 
-        // Staff: by car
         [HttpGet("car/{carId:int}")]
         [Authorize(Roles = "Admin,RentalAgent")]
         public async Task<IEnumerable<MaintenanceRequestDto>> ForCar(int carId)
             => await _svc.GetByCarAsync(carId);
 
-        // Reporter: my requests
         [HttpGet("mine")]
         [Authorize(Roles = "Customer,Admin,RentalAgent")]
         public async Task<IEnumerable<MaintenanceRequestDto>> Mine()
-            => await _svc.GetMineAsync(CurrentUserId);
+            => await _svc.GetMineAsync(await CurrentUserIdAsync());             // 👈 changed
 
-        // Staff: detail
         [HttpGet("{id:int}")]
         [Authorize(Roles = "Admin,RentalAgent")]
         public async Task<ActionResult<MaintenanceRequestDto>> GetById(int id)

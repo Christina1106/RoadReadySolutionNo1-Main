@@ -8,5 +8,6 @@ namespace RoadReady1.Interfaces
     public interface ITokenService
     {
         Task<string> GenerateTokenAsync(string username, string role);
+
     }
 }

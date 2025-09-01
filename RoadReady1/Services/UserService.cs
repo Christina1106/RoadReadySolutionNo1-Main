@@ -12,18 +12,15 @@ namespace RoadReady1.Services
 {
     public class UserService : IUserService
     {
-        private readonly IRepository<int, User> _userRepo;
         private readonly RoadReadyDbContext _db;
         private readonly IMapper _mapper;
         private readonly IPasswordHasher<User> _passwordHasher;
 
         public UserService(
-            IRepository<int, User> userRepo,
             RoadReadyDbContext db,
             IMapper mapper,
             IPasswordHasher<User> passwordHasher)
         {
-            _userRepo = userRepo;
             _db = db;
             _mapper = mapper;
             _passwordHasher = passwordHasher;
@@ -32,97 +29,124 @@ namespace RoadReady1.Services
         public async Task<IEnumerable<UserDto>> GetAllAsync()
         {
             var users = await _db.Users.Include(u => u.Role).ToListAsync();
-            return users.Select(u => new UserDto
-            {
-                UserId = u.UserId,
-                FirstName = u.FirstName,
-                LastName = u.LastName,
-                Email = u.Email,
-                PhoneNumber = u.PhoneNumber,
-                RoleName = u.Role.RoleName,
-                IsActive = u.IsActive,
-                CreatedAt = u.CreatedAt
-            });
+            return users.Select(ToDto);
         }
 
         public async Task<User?> GetByEmailAsync(string email)
         {
-            return await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.Email == email);
+            return await _db.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.Email == email);
         }
 
         public async Task<UserDto> GetByIdAsync(int id)
         {
-            var user = await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == id);
-            if (user == null) throw new NotFoundException($"User {id} not found");
+            var user = await _db.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.UserId == id)
+                ?? throw new NotFoundException($"User {id} not found");
 
-            return new UserDto
-            {
-                UserId = user.UserId,
-                FirstName = user.FirstName,
-                LastName = user.LastName,
-                Email = user.Email,
-                PhoneNumber = user.PhoneNumber,
-                RoleName = user.Role.RoleName,
-                IsActive = user.IsActive,
-                CreatedAt = user.CreatedAt
-            };
+            return ToDto(user);
         }
 
         public async Task<UserDto> CreateAsync(UserCreateDto dto)
         {
-            // (optional) ensure role exists
-            var role = await _db.Roles.FindAsync(dto.RoleId);
-            if (role == null) throw new NotFoundException($"Role {dto.RoleId} not found");
+            var role = await _db.Roles.FirstOrDefaultAsync(r => r.RoleId == dto.RoleId)
+                       ?? throw new NotFoundException($"Role {dto.RoleId} not found");
 
-            var entity = _mapper.Map<User>(dto);
-            entity.PasswordHash = _passwordHasher.HashPassword(entity, dto.Password);
-            entity.CreatedAt = DateTime.UtcNow;
-            entity.IsActive = true;
-
-            await _db.Users.AddAsync(entity);
-            await _db.SaveChangesAsync();
-
-            return new UserDto
+            var user = new User
             {
-                UserId = entity.UserId,
-                FirstName = entity.FirstName,
-                LastName = entity.LastName,
-                Email = entity.Email,
-                PhoneNumber = entity.PhoneNumber,
-                RoleName = role.RoleName,
-                IsActive = entity.IsActive,
-                CreatedAt = entity.CreatedAt
+                FirstName = dto.FirstName.Trim(),
+                LastName = dto.LastName?.Trim(),
+                Email = dto.Email.Trim(),
+                PhoneNumber = dto.PhoneNumber,
+                RoleId = dto.RoleId,
+                CreatedAt = DateTime.UtcNow,
+                IsActive = true
             };
+            user.PasswordHash = _passwordHasher.HashPassword(user, dto.Password);
+
+            _db.Users.Add(user);
+            await _db.SaveChangesAsync();
+            user.Role = role;
+
+            return ToDto(user);
         }
 
         public async Task<UserDto> UpdateAsync(int id, UserUpdateDto dto)
         {
-            var user = await _db.Users.Include(u => u.Role).FirstOrDefaultAsync(u => u.UserId == id);
-            if (user == null) throw new NotFoundException($"User {id} not found");
+            var user = await _db.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.UserId == id)
+                ?? throw new NotFoundException($"User {id} not found");
 
-            _mapper.Map(dto, user);
-            await _db.SaveChangesAsync();
+            if (dto.FirstName is not null)  user.FirstName = dto.FirstName.Trim();
+            if (dto.LastName  is not null)  user.LastName  = dto.LastName.Trim();
+            if (dto.PhoneNumber is not null) user.PhoneNumber = dto.PhoneNumber;
 
-            return new UserDto
+            if (dto.RoleId.HasValue && dto.RoleId.Value != user.RoleId)
             {
-                UserId = user.UserId,
-                FirstName = user.FirstName,
-                LastName = user.LastName,
-                Email = user.Email,
-                PhoneNumber = user.PhoneNumber,
-                RoleName = user.Role.RoleName,
-                IsActive = user.IsActive,
-                CreatedAt = user.CreatedAt
-            };
+                var role = await _db.Roles.FirstOrDefaultAsync(r => r.RoleId == dto.RoleId.Value)
+                           ?? throw new NotFoundException($"Role {dto.RoleId.Value} not found");
+                user.RoleId = role.RoleId;
+                user.Role = role;
+            }
+
+            await _db.SaveChangesAsync();
+            return ToDto(user);
         }
 
         public async Task DeleteAsync(int id)
         {
-            var user = await _db.Users.FindAsync(id);
-            if (user == null) throw new NotFoundException($"User {id} not found");
-
+            var user = await _db.Users.FindAsync(id)
+                       ?? throw new NotFoundException($"User {id} not found");
             _db.Users.Remove(user);
             await _db.SaveChangesAsync();
         }
+
+        public async Task ChangeRoleAsync(int userId, int? roleId, string? roleName)
+        {
+            var user = await _db.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.UserId == userId)
+                ?? throw new NotFoundException("User not found");
+
+            Role role;
+            if (roleId.HasValue)
+            {
+                role = await _db.Roles.FirstOrDefaultAsync(r => r.RoleId == roleId.Value)
+                       ?? throw new NotFoundException("Role not found");
+            }
+            else
+            {
+                role = await _db.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName)
+                       ?? throw new NotFoundException("Role not found");
+            }
+
+            user.RoleId = role.RoleId;
+            user.Role = role;
+            await _db.SaveChangesAsync();
+        }
+
+        public async Task SetActiveAsync(int userId, bool isActive)
+        {
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.UserId == userId)
+                       ?? throw new NotFoundException("User not found");
+
+            user.IsActive = isActive;
+            await _db.SaveChangesAsync();
+        }
+
+        private static UserDto ToDto(User u) => new UserDto
+        {
+            UserId = u.UserId,
+            FirstName = u.FirstName,
+            LastName = u.LastName,
+            Email = u.Email,
+            PhoneNumber = u.PhoneNumber,
+            RoleName = u.Role?.RoleName,
+            IsActive = u.IsActive,
+            CreatedAt = u.CreatedAt
+        };
     }
 }

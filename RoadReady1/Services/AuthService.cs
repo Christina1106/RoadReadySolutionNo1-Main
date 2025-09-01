@@ -34,17 +34,13 @@ namespace RoadReady1.Services
             _mapper = mapper;
         }
 
-        // PUBLIC register -> always Customer (3)
-        public async Task<UserDto> RegisterAsync(UserRegisterDto dto)
-        {
-            return await RegisterInternalAsync(dto, allowRoleOverride: false);
-        }
+        // Public register – HONORS RoleId (validated). If you want public=Customer only, set allowRoleOverride:false.
+        public Task<UserDto> RegisterAsync(UserRegisterDto dto)
+            => RegisterInternalAsync(dto, allowRoleOverride: true);
 
-        // ADMIN register -> honors RoleId (1/2/3)
-        public async Task<UserDto> RegisterWithRoleAsync(UserRegisterDto dto)
-        {
-            return await RegisterInternalAsync(dto, allowRoleOverride: true);
-        }
+        // Admin register – honors RoleId
+        public Task<UserDto> RegisterWithRoleAsync(UserRegisterDto dto)
+            => RegisterInternalAsync(dto, allowRoleOverride: true);
 
         private async Task<UserDto> RegisterInternalAsync(UserRegisterDto dto, bool allowRoleOverride)
         {
@@ -52,20 +48,21 @@ namespace RoadReady1.Services
             var existing = await _userRepo.FindAsync(u => u.Email == dto.Email);
             if (existing != null) throw new UserAlreadyExistsException();
 
-            // 2) decide role
-            int roleId = 3; // default Customer
+            // 2) decide & validate role
+            int roleId = 3; // default to Customer
             if (allowRoleOverride)
             {
-                // only allow valid roles; fall back to Customer if out of range
-                var requested = dto.RoleId;
-                if (requested == 1 || requested == 2 || requested == 3)
-                    roleId = requested;
+                if (dto.RoleId is 1 or 2 or 3)
+                    roleId = dto.RoleId;
+                else
+                    throw new ArgumentException("Invalid RoleId. Allowed: 1=Admin, 2=RentalAgent, 3=Customer");
             }
 
-            // ensure role exists
-            var role = await _roleRepo.GetByIdAsync(roleId);
+            // 3) ensure role exists (and has the correct name mapping in DB)
+            var role = await _roleRepo.GetByIdAsync(roleId)
+                       ?? throw new ArgumentException($"RoleId {roleId} does not exist in Roles table");
 
-            // 3) map + hash
+            // 4) map & hash
             var user = _mapper.Map<User>(dto);
             user.RoleId = roleId;
             user.PasswordHash = _hasher.HashPassword(user, dto.Password);
@@ -74,7 +71,7 @@ namespace RoadReady1.Services
 
             await _userRepo.AddAsync(user);
 
-            // 4) return safe DTO
+            // 5) return safe DTO (include RoleId so controller can show it)
             return new UserDto
             {
                 UserId = user.UserId,
@@ -82,7 +79,7 @@ namespace RoadReady1.Services
                 LastName = user.LastName,
                 Email = user.Email,
                 PhoneNumber = user.PhoneNumber,
-                RoleName = role?.RoleName ?? "Customer",
+                RoleName = role.RoleName,   // "Admin" / "RentalAgent" / "Customer"       // <-- helpful for Swagger verification
                 IsActive = user.IsActive,
                 CreatedAt = user.CreatedAt
             };
@@ -97,7 +94,7 @@ namespace RoadReady1.Services
             if (verified == PasswordVerificationResult.Failed) throw new UnauthorizedException();
 
             var role = await _roleRepo.GetByIdAsync(user.RoleId);
-            var roleName = role.RoleName; // "Admin" / "RentalAgent" / "Customer"
+            var roleName = role.RoleName;
 
             var claims = new[]
             {

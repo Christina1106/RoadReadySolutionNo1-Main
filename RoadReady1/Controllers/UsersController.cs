@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using RoadReady1.Models;
 using RoadReady1.Exceptions;
 using RoadReady1.Interfaces;
 using RoadReady1.Models.DTOs;
@@ -114,5 +115,40 @@ namespace RoadReady1.Controllers
                 return NotFound();
             }
         }
+
+        // PATCH: api/Users/5/role
+        [HttpPatch("{id:int}/role")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> ChangeRole(int id, [FromBody] ChangeRoleDto dto)
+        {
+            if (dto is null || (dto.RoleId is null && string.IsNullOrWhiteSpace(dto.RoleName)))
+                return BadRequest(new { message = "Provide roleId or roleName." });
+
+            try
+            {
+                await _userService.ChangeRoleAsync(id, dto.RoleId, dto.RoleName);
+                return NoContent();
+            }
+            catch (NotFoundException) { return NotFound(); }
+        }
+
+        // PATCH: api/Users/5/status
+        [HttpPatch("{id:int}/status")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> SetStatus(int id, [FromBody] SetUserStatusDto dto)
+        {
+            try
+            {
+                await _userService.SetActiveAsync(id, dto.IsActive);
+                return NoContent();
+            }
+            catch (NotFoundException) { return NotFound(); }
+        }
+
+        // DTOs for the above endpoints
+        public record ChangeRoleDto(int? RoleId, string? RoleName);
+        public record SetUserStatusDto(bool IsActive);
+
+
     }
 }

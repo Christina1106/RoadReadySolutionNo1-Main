@@ -72,6 +72,13 @@ namespace RoadReady1.Context
                 .HasForeignKey(b => b.DropoffLocationId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            modelBuilder.Entity<Location>(e =>
+            {
+                e.HasKey(x => x.LocationId);
+                e.Property(x => x.LocationName).IsRequired().HasMaxLength(100);
+                e.Property(x => x.Address).HasMaxLength(200);
+            });
+
             // Money precision
             modelBuilder.Entity<Car>()
                 .Property(c => c.DailyRate).HasPrecision(10, 2);

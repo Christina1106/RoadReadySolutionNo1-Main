@@ -13,9 +13,9 @@ namespace RoadReady1.Mapping
     {
         public AutoMapperProfile()
         {
-            // --- User mappings ---
-            // DTO → Entity (for registration & updates)
-            CreateMap<UserRegisterDto, User>();
+            CreateMap<UserRegisterDto, User>()
+               .ForMember(d => d.RoleId, o => o.MapFrom(s => s.RoleId));
+
             CreateMap<UserUpdateDto, User>();
             // Entity → DTO (for read operations)
             CreateMap<User, UserDto>();

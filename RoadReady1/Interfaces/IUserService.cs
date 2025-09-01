@@ -19,5 +19,10 @@ namespace RoadReady1.Interfaces
 
         Task<UserDto> UpdateAsync(int userId, UserUpdateDto dto);
         Task DeleteAsync(int userId);
+
+        Task ChangeRoleAsync(int userId, int? roleId, string? roleName);
+        Task SetActiveAsync(int userId, bool isActive);
+
+
     }
 }
